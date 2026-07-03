@@ -166,3 +166,50 @@ pTiS <- ggplot(REhipp)+
 
 pTiS
 ```
+
+```{r}
+m <- lm(TiSL ~ TiSX, data=REhipp)
+summary(m)
+```
+
+#### with 2 measures max for longi? 
+
+Vincent has some issues with the error variance at 0
+
+```{r}
+tadS2 <- tadS %>% filter(nmes <=2)
+  
+mhippL2 <- hlme(hippFSL ~ TiS + AGE75, random=~TiS,subject="RID",data=tadS2)
+mhippX2 <- hlme(hippFSX ~ TiS+ AGE75, random=~TiS,subject="RID",data=tadS2)
+
+summary(mhippL2)
+summary(mhippX2)
+```
+
+```{r}
+REhipp2 <- data.frame(RID=mhippX2$predRE$RID, 
+                     intX=mhippX2$predRE$intercept,
+                     intL= mhippL2$predRE$intercept,
+                     TiSX=mhippX2$predRE$TiS,
+                     TiSL=mhippL2$predRE$TiS)
+
+
+length(mhippL2$predRE$intercept)
+
+pint <- ggplot(REhipp2)+
+  geom_point(aes(x=intX,y=intL))+
+  geom_abline(slope = 1,intercept = 0,color="blue")
+
+pint
+
+pTiS <- ggplot(REhipp2)+
+  geom_point(aes(x=TiSX,y=TiSL))+
+  geom_abline(slope = 1,intercept = 0,color="blue")
+
+pTiS
+```
+
+```{r}
+m2 <- lm(TiSL ~ TiSX, data=REhipp2)
+summary(m2)
+```
