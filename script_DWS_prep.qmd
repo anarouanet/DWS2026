@@ -15,14 +15,12 @@ library(lcmm)
 library(ggplot2)
 ```
 
-
 ### ADNI data TADPOLE challenge
 
 ```{r}
 tad <- read.csv(file="~/Seafile/_NOT_SHARED_RESTE/ANALYSES_ADNI/TADPOLE_D1_D2.csv")
 
 names(tad)[grepl("ST29", names(tad))]
-
 
 ## create variables of volumes
 ## HIPP: 
@@ -49,10 +47,10 @@ tadS <- tad %>%   mutate(
     AGE75 = AGE - 75) %>% filter(!is.na(hippFSL)&!is.na(hippFSX))
 ```
 
-
 # description of the sample
 
 Number of repeated measures of MRI
+
 ```{r}
 tadS <- tadS %>% group_by(RID) %>% mutate(
     nmes   = n()) %>%ungroup()
@@ -63,7 +61,9 @@ quantile(Desc$nmes)
 
 ```
 
-Plots by pattern of number of MRI
+### Plots by patterns
+
+#### Number of MRI
 
 ```{r}
 dataGG <- tadS %>%
@@ -82,6 +82,54 @@ ggplot(dataGG, aes(x = factor(nmes), y = levels, fill = hipp)) +
 
 ```
 
+#### Sex
+
+```{r}
+dataGG <- tadS %>%
+  select(RID, PTGENDER, hippFSL, hippFSX) %>%
+  pivot_longer(cols = c(hippFSL, hippFSX), names_to = "hipp", values_to = "levels")
+
+ggplot(dataGG, aes(x = factor(PTGENDER), y = levels, fill = hipp)) +
+  geom_violin(position = position_dodge(width = 0.8), alpha = 0.7) +
+  labs(
+    x = "Sex",
+    y = "levels",
+    fill = "hipp",
+    title = "Distribution of hippL et hippX"
+  ) +
+  theme_minimal()
+```
+
+#### AGE75
+
+```{r}
+tadS <- tadS %>%
+  mutate(
+    AGE75cat = cut(
+      AGE75,
+      breaks = c(seq(-20, 10, by = 5), 16),
+      include.lowest = TRUE,
+      right = TRUE
+    )
+  )
+summary(tadS$AGE75cat)
+```
+
+```{r}
+dataGG <- tadS %>%
+  select(RID, AGE75cat, hippFSL, hippFSX) %>%
+  pivot_longer(cols = c(hippFSL, hippFSX), names_to = "hipp", values_to = "levels")
+
+ggplot(dataGG, aes(x = factor(AGE75cat), y = levels, fill = hipp)) +
+  geom_violin(position = position_dodge(width = 0.8), alpha = 0.7) +
+  labs(
+    x = "Sex",
+    y = "levels",
+    fill = "hipp",
+    title = "Distribution of hippL et hippX"
+  ) +
+  theme_minimal()
+```
 
 # Linear mixed models
 
