@@ -1,0 +1,120 @@
+---
+title: "Script for DWS"
+format: pdf
+editor: visual
+---
+
+## Preparation of the Data
+
+Libraries
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(lcmm)
+library(ggplot2)
+```
+
+
+### ADNI data TADPOLE challenge
+
+```{r}
+tad <- read.csv(file="~/Seafile/_NOT_SHARED_RESTE/ANALYSES_ADNI/TADPOLE_D1_D2.csv")
+
+names(tad)[grepl("ST29", names(tad))]
+
+
+## create variables of volumes
+## HIPP: 
+tad$hippFSX <- tad$ST29SV_UCSFFSX_11_02_15_UCSFFSX51_08_01_16 / 1000
+tad$hippFSL <- tad$ST29SV_UCSFFSL_02_01_16_UCSFFSL51ALL_08_01_16 /1000
+
+## Histograms of the volumes
+par(mfrow=c(1,2))
+hist(tad$hippFSX)
+hist(tad$hippFSL)
+```
+
+### Creation of the dataset
+
+Time in Study and recentered age at baseline
+
+Selection of the observations with both pipelines
+
+```{r}
+tadS <- tad %>%   mutate(
+    EXAMDATE    = as.Date(EXAMDATE, format = "%Y-%m-%d"),
+    EXAMDATE_bl = as.Date(EXAMDATE_bl, format = "%Y-%m-%d"),
+    TiS=as.numeric(EXAMDATE - EXAMDATE_bl)/365.25,
+    AGE75 = AGE - 75) %>% filter(!is.na(hippFSL)&!is.na(hippFSX))
+```
+
+
+# description of the sample
+
+Number of repeated measures of MRI
+```{r}
+tadS <- tadS %>% group_by(RID) %>% mutate(
+    nmes   = n()) %>%ungroup()
+
+Desc <- tadS %>% group_by(RID) %>% filter(TiS==0)
+
+quantile(Desc$nmes)
+
+```
+
+Plots by pattern of number of MRI
+
+```{r}
+dataGG <- tadS %>%
+  select(RID, nmes, hippFSL, hippFSX) %>%
+  pivot_longer(cols = c(hippFSL, hippFSX), names_to = "hipp", values_to = "levels")
+
+ggplot(dataGG, aes(x = factor(nmes), y = levels, fill = hipp)) +
+  geom_violin(position = position_dodge(width = 0.8), alpha = 0.7) +
+  labs(
+    x = "Number of measures (nmes)",
+    y = "levels",
+    fill = "hipp",
+    title = "Distribution of hippL et hippX by nmes pattern"
+  ) +
+  theme_minimal()
+
+```
+
+
+# Linear mixed models
+
+Time in Study as timescale + adjustment for Age0
+
+```{r}
+library(lcmm)
+mhippL <- hlme(hippFSL ~ TiS + AGE75, random=~TiS,subject="RID",data=tadS)
+mhippX <- hlme(hippFSX ~ TiS+ AGE75, random=~TiS,subject="RID",data=tadS)
+
+summary(mhippL)
+summary(mhippX)
+```
+
+```{r}
+REhipp <- data.frame(RID=mhippX$predRE$RID, 
+                     intX=mhippX$predRE$intercept,
+                     intL= mhippL$predRE$intercept,
+                     TiSX=mhippX$predRE$TiS,
+                     TiSL=mhippL$predRE$TiS)
+
+
+length(mhippL$predRE$intercept)
+
+pint <- ggplot(REhipp)+
+  geom_point(aes(x=intX,y=intL))+
+  geom_abline(slope = 1,intercept = 0,color="blue")
+
+pint
+
+pTiS <- ggplot(REhipp)+
+  geom_point(aes(x=TiSX,y=TiSL))+
+  geom_abline(slope = 1,intercept = 0,color="blue")
+
+pTiS
+```
