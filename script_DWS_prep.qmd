@@ -14,10 +14,8 @@ format:
 Libraries
 
 ```{r}
-library(dplyr)
-library(tidyr)
+library(tidyverse)
 library(lcmm)
-library(ggplot2)
 library(simex)
 library(nlme)
 library(survival)
@@ -27,9 +25,10 @@ library(patchwork)   # used to arrange multiple ggplot objects into one panel
 ## ADNI data TADPOLE challenge
 
 ```{r}
-tad <- read.csv(file="~/Seafile/_NOT_SHARED_RESTE/ANALYSES_ADNI/TADPOLE_D1_D2.csv")
+tad0 <- read.csv(file="~/Seafile/_NOT_SHARED_RESTE/ANALYSES_ADNI/TADPOLE_D1_D2.csv")
 Dict <- read.csv("~/Seafile/_NOT_SHARED_RESTE/ANALYSES_ADNI/TADPOLE_D1_D2_Dict.csv")
 
+tad <- tad0
 names(tad)[grepl("ST29", names(tad))]
 
 names(tad)[grepl("ST88", names(tad))]
@@ -65,24 +64,101 @@ names_new <- ifelse(
   )
 )
 
-names_new <- c(names_new,"hippLeftFSX","hippLeftFSL","hippRightFSX","hippRightFSL", "WMHFSX","WMHFSL")
+names_new <- c(names_new,"hippLeftFSX","hippLeftFSL","hippRightFSX","hippRightFSL", "WMH_Cross","WMH_Long")
 tad <- tad[, names_col]
 names(tad)[17:dim(tad)[2]] <- names_new
 
 
-## create variables of volumes
-## HIPP Left: 
-tad$hippLeftFSX <- tad$hippLeftFSX / 1000
-tad$hippLeftFSL <- tad$hippLeftFSL /1000
-## HIPP Right: 
-tad$hippRightFSX <- tad$hippRightFSX / 1000
-tad$hippRightFSL <- tad$hippRightFSL /1000
+
+
+################################################################################
+# Create ROIs
+################################################################################
+
+temporal = c(
+  "Bankssts", "Entorhinal", "Fusiform", "InferiorTemporal",
+  "MiddleTemporal", "Parahippocampal", "SuperiorTemporal",
+  "TemporalPole", "TransverseTemporal"
+)
+
+parietal = c(
+  "InferiorParietal", "SuperiorParietal", "Supramarginal",
+  "Precuneus", "PosteriorCingulate", "IsthmusCingulate",
+  "Postcentral"
+)
+
+occipital = c(
+  "Cuneus", "LateralOccipital", "Lingual", "Pericalcarine"
+)
+
+frontal = c(
+  "CaudalAnteriorCingulate", "CaudalMiddleFrontal",
+  "FrontalPole", "LateralOrbitofrontal", "MedialOrbitofrontal",
+  "ParsOpercularis", "ParsOrbitalis", "ParsTriangularis",
+  "Precentral", "Paracentral",
+  "RostralAnteriorCingulate", "RostralMiddleFrontal",
+  "SuperiorFrontal"
+)
+
+subcortical = c(
+  "Insula", "CorpusCallosum"
+)
+
+make_vars = function(regions, suffix) {
+  c(
+    paste0("Left", regions, "_", suffix),
+    paste0("Right", regions, "_", suffix)
+  )
+}
+
+tadpole = tad %>%
+  mutate(
+    
+    Temporal_Long = rowSums(across(all_of(make_vars(temporal, "Long"))), na.rm = FALSE),
+    Temporal_Cross = rowSums(across(all_of(make_vars(temporal, "Cross"))), na.rm = FALSE),
+    
+    Parietal_Long = rowSums(across(all_of(make_vars(parietal, "Long"))), na.rm = FALSE),
+    Parietal_Cross = rowSums(across(all_of(make_vars(parietal, "Cross"))), na.rm = FALSE),
+    
+    Occipital_Long = rowSums(across(all_of(make_vars(occipital, "Long"))), na.rm = FALSE),
+    Occipital_Cross = rowSums(across(all_of(make_vars(occipital, "Cross"))), na.rm = FALSE),
+    
+    Frontal_Long = rowSums(across(all_of(make_vars(frontal, "Long"))), na.rm = FALSE),
+    Frontal_Cross = rowSums(across(all_of(make_vars(frontal, "Cross"))), na.rm = FALSE),
+    
+    Subcortical_Long = rowSums(across(all_of(make_vars(subcortical, "Long"))), na.rm = FALSE),
+    Subcortical_Cross = rowSums(across(all_of(make_vars(subcortical, "Cross"))), na.rm = FALSE)
+  )
+
+tadpole = tadpole %>%
+  mutate(hippLeft_Long = hippLeftFSL/1000, hippLeft_Cross = hippLeftFSX/1000,
+         hippRight_Long = hippRightFSL/1000, hippRight_Cross = hippRightFSX/1000,
+         ICV_1M = ICV/1000000)
+
+
+
+# 
+# ## create variables of volumes
+# ## HIPP Left: 
+# tad$hippLeftFSX <- tad$hippLeftFSX / 1000
+# tad$hippLeftFSL <- tad$hippLeftFSL /1000
+# ## HIPP Right: 
+# tad$hippRightFSX <- tad$hippRightFSX / 1000
+# tad$hippRightFSL <- tad$hippRightFSL /1000
+# 
+# ## create variables of volumes
+# ## HIPP Left: 
+# tad$hippLeftFSX <- tad$hippLeftFSX / 1000
+# tad$hippLeftFSL <- tad$hippLeftFSL /1000
+# ## HIPP Right: 
+# tad$hippRightFSX <- tad$hippRightFSX / 1000
+# tad$hippRightFSL <- tad$hippRightFSL /1000
 
 
 ## Histograms of the volumes
 par(mfrow=c(1,2))
-hist(tad$hippLeftFSX)
-hist(tad$hippLeftFSL)
+hist(tadpole$hippLeft_Cross)
+hist(tadpole$hippLeft_Long)
 
 ```
 
@@ -93,11 +169,11 @@ Time in Study and recentered age at baseline
 Selection of the observations with both pipelines
 
 ```{r}
-tadS <- tad %>%   mutate(
+tadS <- tadpole %>%   mutate(
     EXAMDATE    = as.Date(EXAMDATE, format = "%Y-%m-%d"),
     EXAMDATE_bl = as.Date(EXAMDATE_bl, format = "%Y-%m-%d"),
     TiS=as.numeric(EXAMDATE - EXAMDATE_bl)/365.25,
-    AGE75 = AGE - 75) %>% filter(!is.na(hippLeftFSL)&!is.na(hippLeftFSX))
+    AGE75 = AGE - 75) %>% filter(!is.na(hippLeft_Long)&!is.na(hippLeft_Cross))
 ```
 
 # description of the sample
@@ -120,8 +196,8 @@ quantile(Desc$nmes)
 
 ```{r}
 dataGG <- tadS %>%
-  select(RID, nmes, hippLeftFSL, hippLeftFSX) %>%
-  pivot_longer(cols = c(hippLeftFSL, hippLeftFSX), names_to = "hipp", values_to = "levels")
+  select(RID, nmes, hippLeft_Long, hippLeft_Cross) %>%
+  pivot_longer(cols = c(hippLeft_Long, hippLeft_Cross), names_to = "hipp", values_to = "levels")
 
 ggplot(dataGG, aes(x = factor(nmes), y = levels, fill = hipp)) +
   geom_violin(position = position_dodge(width = 0.8), alpha = 0.7) +
@@ -139,8 +215,8 @@ ggplot(dataGG, aes(x = factor(nmes), y = levels, fill = hipp)) +
 
 ```{r}
 dataGG <- tadS %>% filter(TiS==0) %>%
-  select(RID, nmes, hippLeftFSL, hippLeftFSX) %>%
-  pivot_longer(cols = c(hippLeftFSL, hippLeftFSX), names_to = "hipp", values_to = "levels")
+  select(RID, nmes, hippLeft_Long, hippLeft_Cross) %>%
+  pivot_longer(cols = c(hippLeft_Long, hippLeft_Cross), names_to = "hipp", values_to = "levels")
 
 ggplot(dataGG, aes(x = factor(nmes), y = levels, fill = hipp)) +
   geom_violin(position = position_dodge(width = 0.8), alpha = 0.7) +
@@ -158,8 +234,8 @@ ggplot(dataGG, aes(x = factor(nmes), y = levels, fill = hipp)) +
 
 ```{r}
 dataGG <- tadS %>%
-  select(RID, PTGENDER, hippLeftFSL, hippLeftFSX) %>%
-  pivot_longer(cols = c(hippLeftFSL, hippLeftFSX), names_to = "hipp", values_to = "levels")
+  select(RID, PTGENDER, hippLeft_Long, hippLeft_Cross) %>%
+  pivot_longer(cols = c(hippLeft_Long, hippLeft_Cross), names_to = "hipp", values_to = "levels")
 
 ggplot(dataGG, aes(x = factor(PTGENDER), y = levels, fill = hipp)) +
   geom_violin(position = position_dodge(width = 0.8), alpha = 0.7) +
@@ -189,8 +265,8 @@ summary(tadS$AGE75cat)
 
 ```{r}
 dataGG <- tadS %>%
-  select(RID, AGE75cat, hippLeftFSL, hippLeftFSX) %>%
-  pivot_longer(cols = c(hippLeftFSL, hippLeftFSX), names_to = "hipp", values_to = "levels")
+  select(RID, AGE75cat, hippLeft_Long, hippLeft_Cross) %>%
+  pivot_longer(cols = c(hippLeft_Long, hippLeft_Cross), names_to = "hipp", values_to = "levels")
 
 ggplot(dataGG, aes(x = factor(AGE75cat), y = levels, fill = hipp)) +
   geom_violin(position = position_dodge(width = 0.8), alpha = 0.7) +
@@ -275,28 +351,35 @@ Its application
 
 
 ```{r}
-tadS$logWMHFSX <- log(tadS$WMHFSX)
-tadS$logWMHFSL <- log(tadS$WMHFSL)
+tadS$logWMH_Cross <- log(tadS$WMH_Cross)
+tadS$logWMH_Long <- log(tadS$WMH_Long)
+tadS$WMH_Cross <- tadS$WMH_Cross/1000
+tadS$WMH_Long <- tadS$WMH_Long/1000
 listRegions <- c("hippLeft","hippRight", "WMH","logWMH")
 
 
 p <- bland_altman_panel(tadS, listRegions,
-                         suffix1 = "FSX", suffix2 = "FSL", ncol = 2)
+                         suffix1 = "_Cross", suffix2 = "_Long", ncol = 2)
 
 print(p)
 ```
 
-# MRI as outcome : lnear mixed models
+# MRI as outcome : linear mixed models
 
 Time in Study as timescale + adjustment for Age0
 
 ```{r}
 library(lcmm)
-mhippL <- hlme(hippLeftFSL ~ TiS + AGE75, random=~TiS,subject="RID",data=tadS)
-mhippX <- hlme(hippLeftFSX ~ TiS+ AGE75, random=~TiS,subject="RID",data=tadS)
+
+mhippL <- hlme(hippLeft_Long ~ AGE75 + PTGENDER*TiS, random=~TiS,subject="RID",data=tadS)
+mhippX <- hlme(hippLeft_Cross ~ AGE75 + PTGENDER*TiS, random=~TiS,subject="RID",data=tadS)
 
 summary(mhippL)
 summary(mhippX)
+
+
+sdEpsHippL <- abs(mhippL$best[length(mhippL$best)])
+sdEpsHippX <- abs(mhippX$best[length(mhippX$best)])
 ```
 
 ```{r}
@@ -334,8 +417,8 @@ Vincent has some issues with the error variance at 0
 ```{r}
 tadS2 <- tadS %>% filter(nmes <=2)
   
-mhippL2 <- hlme(hippLeftFSL ~ TiS + AGE75, random=~TiS,subject="RID",data=tadS2)
-mhippX2 <- hlme(hippLeftFSX ~ TiS+ AGE75, random=~TiS,subject="RID",data=tadS2)
+mhippL2 <- hlme(hippLeft_Long ~ TiS + AGE75, random=~TiS,subject="RID",data=tadS2)
+mhippX2 <- hlme(hippLeft_Cross ~ TiS+ AGE75, random=~TiS,subject="RID",data=tadS2)
 
 summary(mhippL2)
 summary(mhippX2)
@@ -377,13 +460,13 @@ summary(m2)
 library(nlme)
 tadS <- tadS %>% mutate(nmes2=ifelse(nmes==1,1,ifelse(nmes==2,2,3)))
 
-mhippLnh <- lme(hippLeftFSL ~ TiS + AGE75, random=~TiS | RID,data=tadS)
-mhippLh <- lme(hippLeftFSL ~ TiS + AGE75, random=~TiS | RID,data=tadS,
+mhippLnh <- lme(hippLeft_Long ~ TiS + AGE75, random=~TiS | RID,data=tadS)
+mhippLh <- lme(hippLeft_Long ~ TiS + AGE75, random=~TiS | RID,data=tadS,
   weights = varIdent(form = ~ 1 | nmes2)
 )
 
-mhippXnh <- lme(hippLeftFSX ~ TiS + AGE75, random=~TiS | RID,data=tadS)
-mhippXh <- lme(hippLeftFSX ~ TiS + AGE75, random=~TiS | RID,data=tadS,
+mhippXnh <- lme(hippLeft_Cross ~ TiS + AGE75, random=~TiS | RID,data=tadS)
+mhippXh <- lme(hippLeft_Cross ~ TiS + AGE75, random=~TiS | RID,data=tadS,
   weights = varIdent(form = ~ 1 | nmes2)
 )
 
@@ -395,14 +478,97 @@ summary(mhippX)
 ```
 
 
+# MRI as Covariate: Cox model
+
+
+```{r}
+# data baseline
+tadS0 <- tadS %>% filter(TiS==0)
+
+tadSurv <- tadS %>%
+  group_by(RID) %>%
+  summarise(
+    time_dementia = if (any(grepl("Dementia", DX, ignore.case = TRUE), na.rm = TRUE))
+                        min(TiS[grepl("Dementia", DX, ignore.case = TRUE)], na.rm = TRUE)
+                     else NA_real_,
+    time_last_visit = max(TiS, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    TimeEvent   = if_else(!is.na(time_dementia), time_dementia, time_last_visit),
+    StatusEvent = if_else(!is.na(time_dementia), 1L, 0L)
+  )
+
+dim(tadSurv)
+
+tadSurv <- merge(tadSurv,tadS0,by="RID")
+```
+
+
+I use a code to obtain the Forest plot per region
+
+
+```{r}
+CoxMRI <- function(MRI.ROI){
+Cox_Long <- coxph(as.formula(paste("Surv(TimeEvent,StatusEvent) ~ AGE75+ ICV_1M+",paste0(MRI.ROI,"_Long"))), data = tadSurv,model=TRUE)
+Cox_Cross <- coxph(as.formula(paste("Surv(TimeEvent,StatusEvent) ~ AGE75+ICV_1M+ ",paste0(MRI.ROI,"_Cross"))), data = tadSurv,model=TRUE)
+res <- bind_rows(list("Long"=broom::tidy(Cox_Long),
+                      "Cross"=broom::tidy(Cox_Cross)),.id="pipeline") %>% mutate(ROI=MRI.ROI)
+return(res)
+}
+
+
+ROI.names = c('Temporal','Parietal','Occipital','Frontal','hippLeft','hippRight', 'WMH','logWMH')
+
+CoxBeta <- NULL
+for (MRI.ROI in ROI.names){
+  CoxBeta <- rbind(CoxBeta,CoxMRI(MRI.ROI))
+}
+CoxBeta <- CoxBeta %>% mutate(term=str_replace(term,"_Long",""),
+                              term=str_replace(term,"_Cross",""))
+CoxBeta
+```
+
+
+```{r}
+ggplot(data=CoxBeta %>% filter(term!="AGE75" & term!="ICV_1M"), aes(x=estimate,y=ROI,color=pipeline,xmin=estimate-1.96*std.error,xmax=estimate+1.96*std.error)) +
+  geom_pointrange(position=position_dodge(0.2))+
+ # facet_wrap(~term,scale="free")+
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+   ggtitle("logHR MRI covariate on dementia")
+```
+
+```{r}
+ggplot(data=CoxBeta %>% filter(term=="AGE75"),aes(x=estimate,y=ROI,color=pipeline,xmin=estimate-1.96*std.error,xmax=estimate+1.96*std.error)) +
+  geom_pointrange(position=position_dodge(0.2))+
+ # facet_wrap(~term,scale="free")+
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+   ggtitle("logHR Age (centered75) on dementia")
+```
+
+
+
+
+```{r}
+ggplot(data=CoxBeta %>% filter(term=="ICV_1M"),aes(x=estimate,y=ROI,color=pipeline,xmin=estimate-1.96*std.error,xmax=estimate+1.96*std.error)) +
+  geom_pointrange(position=position_dodge(0.2))+
+ # facet_wrap(~term,scale="free")+
+    theme_classic() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+   ggtitle("logHR ICV on dementia")
+```
+
+
 
 # MRI as Covariate: SIMEX for hipp as the covariate? 
 
 #### 0. The data 
 
 ```{r}
-tadS$EP_VolL <- tadS$hippLeftFSL
-tadS$EP_VolX <- tadS$hippLeftFSX
+tadS$EP_VolL <- tadS$hippLeft_Long
+tadS$EP_VolX <- tadS$hippLeft_Cross
 tadS$Cog <- tadS$RAVLT_forgetting
 ```
 
@@ -416,8 +582,8 @@ tadS$Cog <- tadS$RAVLT_forgetting
 #### 1. Model for the residual error
 
 ```{r}
-mhippL <- hlme(hippLeftFSL ~ TiS + AGE75, random=~TiS,subject="RID",data=tadS)
-mhippX <- hlme(hippLeftFSX ~ TiS+ AGE75, random=~TiS,subject="RID",data=tadS)
+mhippL <- hlme(hippLeft_Long ~ TiS + AGE75, random=~TiS,subject="RID",data=tadS)
+mhippX <- hlme(hippLeft_Cross ~ TiS+ AGE75, random=~TiS,subject="RID",data=tadS)
 
 sdEpsHippL <- abs(mhippL$best[length(mhippL$best)])
 sdEpsHippX <- abs(mhippX$best[length(mhippX$best)])
@@ -474,24 +640,6 @@ plot(res_simex)
 #### I test now with a Time-to-event outcome 
 
 ```{r}
-tadSurv <- tadS %>%
-  group_by(RID) %>%
-  summarise(
-    time_dementia = if (any(grepl("Dementia", DX, ignore.case = TRUE), na.rm = TRUE))
-                        min(TiS[grepl("Dementia", DX, ignore.case = TRUE)], na.rm = TRUE)
-                     else NA_real_,
-    time_last_visit = max(TiS, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  mutate(
-    TimeEvent   = if_else(!is.na(time_dementia), time_dementia, time_last_visit),
-    StatusEvent = if_else(!is.na(time_dementia), 1L, 0L)
-  )
-
-dim(tadSurv)
-
-tadSurv <- merge(tadSurv,tadS0,by="RID")
-
 # naive primary model
 Cox0 <- coxph(Surv(TimeEvent,StatusEvent) ~ EP_VolL + AGE75, data = tadSurv,
               model=TRUE)
