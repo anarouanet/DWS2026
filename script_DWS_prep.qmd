@@ -1,10 +1,15 @@
 ---
 title: "Script for DWS"
-format: pdf
 editor: visual
+format:
+  html:
+    toc: true
+    toc-depth: 3          # profondeur des titres inclus (par défaut 3)
+    toc-location: left    # left, right, ou body
+    number-sections: true # numérote les sections (souvent utilisé avec toc)
 ---
 
-## Preparation of the Data
+# Preparation of the Data
 
 Libraries
 
@@ -13,27 +18,75 @@ library(dplyr)
 library(tidyr)
 library(lcmm)
 library(ggplot2)
+library(simex)
+library(nlme)
+library(survival)
+library(patchwork)   # used to arrange multiple ggplot objects into one panel
 ```
 
-### ADNI data TADPOLE challenge
+## ADNI data TADPOLE challenge
 
 ```{r}
 tad <- read.csv(file="~/Seafile/_NOT_SHARED_RESTE/ANALYSES_ADNI/TADPOLE_D1_D2.csv")
+Dict <- read.csv("~/Seafile/_NOT_SHARED_RESTE/ANALYSES_ADNI/TADPOLE_D1_D2_Dict.csv")
 
 names(tad)[grepl("ST29", names(tad))]
 
+names(tad)[grepl("ST88", names(tad))]
+
+### Renamme columns for cortical thicknesses ----
+names_col<-c("RID", "AGE","PTGENDER","PTEDUCAT","APOE4","EXAMDATE","EXAMDATE_bl",
+             "DX_bl","DX",
+             "MMSE","RAVLT_immediate","CDRSB", "CDRSB_bl",
+             "ICV", "Hippocampus",#"TOTAL_WMH",
+             "AV45",
+             names(tad)[grep("TA_UCSFFS", names(tad))],#cortical thickness
+             "ST29SV_UCSFFSX_11_02_15_UCSFFSX51_08_01_16",
+             "ST29SV_UCSFFSL_02_01_16_UCSFFSL51ALL_08_01_16",
+             "ST88SV_UCSFFSL_02_01_16_UCSFFSL51ALL_08_01_16",
+             "ST88SV_UCSFFSX_11_02_15_UCSFFSX51_08_01_16"   ,
+             "ST128SV_UCSFFSX_11_02_15_UCSFFSX51_08_01_16",
+             "ST128SV_UCSFFSL_02_01_16_UCSFFSL51ALL_08_01_16")
+
+# Renames columns of cortical thicknesses : Region_Cross or Region_Long
+names_CT <- names(tad)[grep("TA_UCSFFS", names(tad))]
+
+idx <- match(names_CT, Dict$FLDNAME)
+
+names_new <- ifelse(
+  grepl("Cross-Sectional FreeSurfer", Dict$CRFNAME[idx]),
+  paste0(
+    sub("^Cortical Thickness Average of ", "", Dict$TEXT[idx]),
+    "_Cross"
+  ),
+  paste0(
+    sub("^Cortical Thickness Average of ", "", Dict$TEXT[idx]),
+    "_Long"
+  )
+)
+
+names_new <- c(names_new,"hippLeftFSX","hippLeftFSL","hippRightFSX","hippRightFSL", "WMHFSX","WMHFSL")
+tad <- tad[, names_col]
+names(tad)[17:dim(tad)[2]] <- names_new
+
+
 ## create variables of volumes
-## HIPP: 
-tad$hippFSX <- tad$ST29SV_UCSFFSX_11_02_15_UCSFFSX51_08_01_16 / 1000
-tad$hippFSL <- tad$ST29SV_UCSFFSL_02_01_16_UCSFFSL51ALL_08_01_16 /1000
+## HIPP Left: 
+tad$hippLeftFSX <- tad$hippLeftFSX / 1000
+tad$hippLeftFSL <- tad$hippLeftFSL /1000
+## HIPP Right: 
+tad$hippRightFSX <- tad$hippRightFSX / 1000
+tad$hippRightFSL <- tad$hippRightFSL /1000
+
 
 ## Histograms of the volumes
 par(mfrow=c(1,2))
-hist(tad$hippFSX)
-hist(tad$hippFSL)
+hist(tad$hippLeftFSX)
+hist(tad$hippLeftFSL)
+
 ```
 
-### Creation of the dataset
+## Creation of the dataset
 
 Time in Study and recentered age at baseline
 
@@ -44,7 +97,7 @@ tadS <- tad %>%   mutate(
     EXAMDATE    = as.Date(EXAMDATE, format = "%Y-%m-%d"),
     EXAMDATE_bl = as.Date(EXAMDATE_bl, format = "%Y-%m-%d"),
     TiS=as.numeric(EXAMDATE - EXAMDATE_bl)/365.25,
-    AGE75 = AGE - 75) %>% filter(!is.na(hippFSL)&!is.na(hippFSX))
+    AGE75 = AGE - 75) %>% filter(!is.na(hippLeftFSL)&!is.na(hippLeftFSX))
 ```
 
 # description of the sample
@@ -61,46 +114,65 @@ quantile(Desc$nmes)
 
 ```
 
-### Plots by patterns
+## Plots by patterns
 
-#### Number of MRI
+### Number of MRI
 
 ```{r}
 dataGG <- tadS %>%
-  select(RID, nmes, hippFSL, hippFSX) %>%
-  pivot_longer(cols = c(hippFSL, hippFSX), names_to = "hipp", values_to = "levels")
+  select(RID, nmes, hippLeftFSL, hippLeftFSX) %>%
+  pivot_longer(cols = c(hippLeftFSL, hippLeftFSX), names_to = "hipp", values_to = "levels")
 
 ggplot(dataGG, aes(x = factor(nmes), y = levels, fill = hipp)) +
   geom_violin(position = position_dodge(width = 0.8), alpha = 0.7) +
   labs(
     x = "Number of measures (nmes)",
-    y = "levels",
-    fill = "hipp",
+    y = "Hipp volume",
+    fill = "pipeline",
     title = "Distribution of hippL et hippX by nmes pattern"
   ) +
   theme_minimal()
-
 ```
 
-#### Sex
+### Number of MRI on data at baseline
+
+
+```{r}
+dataGG <- tadS %>% filter(TiS==0) %>%
+  select(RID, nmes, hippLeftFSL, hippLeftFSX) %>%
+  pivot_longer(cols = c(hippLeftFSL, hippLeftFSX), names_to = "hipp", values_to = "levels")
+
+ggplot(dataGG, aes(x = factor(nmes), y = levels, fill = hipp)) +
+  geom_violin(position = position_dodge(width = 0.8), alpha = 0.7) +
+  labs(
+    x = "Number of measures (nmes)",
+    y = "Hipp volume",
+    fill = "pipeline",
+    title = "Distribution of hippL et hippX by nmes pattern"
+  ) +
+  theme_minimal()
+```
+
+
+### Sex
 
 ```{r}
 dataGG <- tadS %>%
-  select(RID, PTGENDER, hippFSL, hippFSX) %>%
-  pivot_longer(cols = c(hippFSL, hippFSX), names_to = "hipp", values_to = "levels")
+  select(RID, PTGENDER, hippLeftFSL, hippLeftFSX) %>%
+  pivot_longer(cols = c(hippLeftFSL, hippLeftFSX), names_to = "hipp", values_to = "levels")
 
 ggplot(dataGG, aes(x = factor(PTGENDER), y = levels, fill = hipp)) +
   geom_violin(position = position_dodge(width = 0.8), alpha = 0.7) +
   labs(
     x = "Sex",
-    y = "levels",
-    fill = "hipp",
+    y = "Hipp volume",
+    fill = "pipeline",
     title = "Distribution of hippL et hippX"
   ) +
   theme_minimal()
 ```
 
-#### AGE75
+### AGE75
 
 ```{r}
 tadS <- tadS %>%
@@ -117,13 +189,13 @@ summary(tadS$AGE75cat)
 
 ```{r}
 dataGG <- tadS %>%
-  select(RID, AGE75cat, hippFSL, hippFSX) %>%
-  pivot_longer(cols = c(hippFSL, hippFSX), names_to = "hipp", values_to = "levels")
+  select(RID, AGE75cat, hippLeftFSL, hippLeftFSX) %>%
+  pivot_longer(cols = c(hippLeftFSL, hippLeftFSX), names_to = "hipp", values_to = "levels")
 
 ggplot(dataGG, aes(x = factor(AGE75cat), y = levels, fill = hipp)) +
   geom_violin(position = position_dodge(width = 0.8), alpha = 0.7) +
   labs(
-    x = "Sex",
+    x = "age",
     y = "levels",
     fill = "hipp",
     title = "Distribution of hippL et hippX"
@@ -131,14 +203,97 @@ ggplot(dataGG, aes(x = factor(AGE75cat), y = levels, fill = hipp)) +
   theme_minimal()
 ```
 
-# Linear mixed models
+
+
+## Bland-Altman plot 
+
+
+The function first
+
+```{r}
+# -----------------------------------------------------------------------------
+# Compute Bland-Altman statistics (mean, difference, bias, limits of agreement)
+# -----------------------------------------------------------------------------
+bland_altman_stats <- function(x, y) {
+  # x, y: numeric vectors of equal length (method 1 and method 2 measurements)
+  mean_xy   <- (x + y) / 2
+  diff_xy   <- x - y
+  bias      <- mean(diff_xy, na.rm = TRUE)
+  sd_diff   <- sd(diff_xy, na.rm = TRUE)
+  loa_lower <- bias - 1.96 * sd_diff
+  loa_upper <- bias + 1.96 * sd_diff
+
+  data.frame(mean = mean_xy, diff = diff_xy,
+             bias = bias, loa_lower = loa_lower, loa_upper = loa_upper)
+}
+
+# -----------------------------------------------------------------------------
+# Build a single Bland-Altman ggplot for one variable
+# -----------------------------------------------------------------------------
+bland_altman_plot <- function(data, var_name, suffix1 = "_1", suffix2 = "_2") {
+  # data     : data.frame containing the paired columns
+  # var_name : base variable name (without suffix)
+  # suffix1  : suffix identifying method 1 column
+  # suffix2  : suffix identifying method 2 column
+
+  col1 <- paste0(var_name, suffix1)
+  col2 <- paste0(var_name, suffix2)
+
+  if (!all(c(col1, col2) %in% names(data))) {
+    stop(paste("Columns", col1, "and/or", col2, "not found in data"))
+  }
+
+  ba_data <- bland_altman_stats(data[[col1]], data[[col2]])
+
+  ggplot(ba_data, aes(x = mean, y = diff)) +
+    geom_point(alpha = 0.6, color = "steelblue") +
+    geom_hline(aes(yintercept = bias), color = "black", linewidth = 0.6) +
+    geom_hline(aes(yintercept = loa_lower), color = "red", linetype = "dashed") +
+    geom_hline(aes(yintercept = loa_upper), color = "red", linetype = "dashed") +
+    labs(title = var_name,
+         x = "Mean of X and L",
+         y = "Difference (X - L)") +
+    theme_minimal(base_size = 10)
+}
+
+# -----------------------------------------------------------------------------
+# Build a panel of Bland-Altman plots for a vector of variable names
+# -----------------------------------------------------------------------------
+bland_altman_panel <- function(data, vars, suffix1 = "_1", suffix2 = "_2", ncol = 2) {
+  # data    : data.frame containing all the paired columns
+  # vars    : character vector of base variable names (the input vector)
+  # suffix1 : suffix identifying method 1 columns (default "_1")
+  # suffix2 : suffix identifying method 2 columns (default "_2")
+  # ncol    : number of columns in the panel layout
+
+  plots <- lapply(vars, function(v) bland_altman_plot(data, v, suffix1, suffix2))
+  wrap_plots(plots, ncol = ncol)
+}
+```
+
+Its application
+
+
+```{r}
+tadS$logWMHFSX <- log(tadS$WMHFSX)
+tadS$logWMHFSL <- log(tadS$WMHFSL)
+listRegions <- c("hippLeft","hippRight", "WMH","logWMH")
+
+
+p <- bland_altman_panel(tadS, listRegions,
+                         suffix1 = "FSX", suffix2 = "FSL", ncol = 2)
+
+print(p)
+```
+
+# MRI as outcome : lnear mixed models
 
 Time in Study as timescale + adjustment for Age0
 
 ```{r}
 library(lcmm)
-mhippL <- hlme(hippFSL ~ TiS + AGE75, random=~TiS,subject="RID",data=tadS)
-mhippX <- hlme(hippFSX ~ TiS+ AGE75, random=~TiS,subject="RID",data=tadS)
+mhippL <- hlme(hippLeftFSL ~ TiS + AGE75, random=~TiS,subject="RID",data=tadS)
+mhippX <- hlme(hippLeftFSX ~ TiS+ AGE75, random=~TiS,subject="RID",data=tadS)
 
 summary(mhippL)
 summary(mhippX)
@@ -172,15 +327,15 @@ m <- lm(TiSL ~ TiSX, data=REhipp)
 summary(m)
 ```
 
-#### with 2 measures max for longi? 
+## with 2 measures max for longi? 
 
 Vincent has some issues with the error variance at 0
 
 ```{r}
 tadS2 <- tadS %>% filter(nmes <=2)
   
-mhippL2 <- hlme(hippFSL ~ TiS + AGE75, random=~TiS,subject="RID",data=tadS2)
-mhippX2 <- hlme(hippFSX ~ TiS+ AGE75, random=~TiS,subject="RID",data=tadS2)
+mhippL2 <- hlme(hippLeftFSL ~ TiS + AGE75, random=~TiS,subject="RID",data=tadS2)
+mhippX2 <- hlme(hippLeftFSX ~ TiS+ AGE75, random=~TiS,subject="RID",data=tadS2)
 
 summary(mhippL2)
 summary(mhippX2)
@@ -213,3 +368,146 @@ pTiS
 m2 <- lm(TiSL ~ TiSX, data=REhipp2)
 summary(m2)
 ```
+
+
+## Heteroskedasticity
+
+
+```{r}
+library(nlme)
+tadS <- tadS %>% mutate(nmes2=ifelse(nmes==1,1,ifelse(nmes==2,2,3)))
+
+mhippLnh <- lme(hippLeftFSL ~ TiS + AGE75, random=~TiS | RID,data=tadS)
+mhippLh <- lme(hippLeftFSL ~ TiS + AGE75, random=~TiS | RID,data=tadS,
+  weights = varIdent(form = ~ 1 | nmes2)
+)
+
+mhippXnh <- lme(hippLeftFSX ~ TiS + AGE75, random=~TiS | RID,data=tadS)
+mhippXh <- lme(hippLeftFSX ~ TiS + AGE75, random=~TiS | RID,data=tadS,
+  weights = varIdent(form = ~ 1 | nmes2)
+)
+
+anova(mhippLnh,mhippLh)
+anova(mhippXnh,mhippXh)
+
+summary(mhippL)
+summary(mhippX)
+```
+
+
+
+# MRI as Covariate: SIMEX for hipp as the covariate? 
+
+#### 0. The data 
+
+```{r}
+tadS$EP_VolL <- tadS$hippLeftFSL
+tadS$EP_VolX <- tadS$hippLeftFSX
+tadS$Cog <- tadS$RAVLT_forgetting
+```
+
+#### The Pipeline
+
+1. I create a model to retrieve an estimate of the residual error of my volume
+2. I create the naive primary model of interest 
+3. I use SIMEX
+
+
+#### 1. Model for the residual error
+
+```{r}
+mhippL <- hlme(hippLeftFSL ~ TiS + AGE75, random=~TiS,subject="RID",data=tadS)
+mhippX <- hlme(hippLeftFSX ~ TiS+ AGE75, random=~TiS,subject="RID",data=tadS)
+
+sdEpsHippL <- abs(mhippL$best[length(mhippL$best)])
+sdEpsHippX <- abs(mhippX$best[length(mhippX$best)])
+```
+#### I test with a cross-sectional outcome
+
+I use cognition at baseline to test the package with a lm model
+
+For longitudinal pipeline
+
+```{r}
+# data baseline
+tadS0 <- tadS %>% filter(TiS==0)
+
+# naive model
+LMM0 <- lm( Cog ~ EP_VolL, data = tadS,na.action = na.omit)
+summary(LMM0)
+
+# simex
+res_simex <- simex(LMM0,
+                    SIMEXvariable     = "EP_VolL",
+                    measurement.error = sdEpsHippL,
+                    lambda            = c(0.5, 1, 1.5, 2,3,4),
+                    B                 = 200,
+                    fitting.method    = "quadratic",   
+                    asymptotic        = FALSE)         # FALSE => variance par jackknife
+summary(res_simex)
+plot(res_simex)
+```
+
+For a cross-sectional pipeline
+
+```{r}
+# data baseline
+tadS0 <- tadS %>% filter(TiS==0)
+
+# naive model
+LMM0 <- lm( Cog ~ EP_VolX, data = tadS,na.action = na.omit)
+summary(LMM0)
+
+# simex
+res_simex <- simex(LMM0,
+                    SIMEXvariable     = "EP_VolX",
+                    measurement.error = sdEpsHippX,
+                    lambda            = c(0.5, 1, 1.5, 2,3,4),
+                    B                 = 200,
+                    fitting.method    = "quadratic",   
+                    asymptotic        = FALSE)         # FALSE => variance par jackknife
+summary(res_simex)
+plot(res_simex)
+```
+
+
+#### I test now with a Time-to-event outcome 
+
+```{r}
+tadSurv <- tadS %>%
+  group_by(RID) %>%
+  summarise(
+    time_dementia = if (any(grepl("Dementia", DX, ignore.case = TRUE), na.rm = TRUE))
+                        min(TiS[grepl("Dementia", DX, ignore.case = TRUE)], na.rm = TRUE)
+                     else NA_real_,
+    time_last_visit = max(TiS, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    TimeEvent   = if_else(!is.na(time_dementia), time_dementia, time_last_visit),
+    StatusEvent = if_else(!is.na(time_dementia), 1L, 0L)
+  )
+
+dim(tadSurv)
+
+tadSurv <- merge(tadSurv,tadS0,by="RID")
+
+# naive primary model
+Cox0 <- coxph(Surv(TimeEvent,StatusEvent) ~ EP_VolL + AGE75, data = tadSurv,
+              model=TRUE)
+summary(Cox0)
+
+# simex
+set.seed(123)
+res_simex <- simex(Cox0,
+                    SIMEXvariable     = "EP_VolL",
+                    measurement.error = sdEpsHippL,
+                    lambda            = c(0.5, 1, 1.5, 2,3,4,5,10),
+                    B                 = 200,
+                    fitting.method    = "quadratic",   
+                    asymptotic        = FALSE)         # FALSE => variance par jackknife
+summary(res_simex)
+plot(res_simex)
+```
+
+
